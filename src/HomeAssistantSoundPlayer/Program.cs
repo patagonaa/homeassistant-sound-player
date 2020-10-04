@@ -109,13 +109,31 @@ namespace HomeAssistantSoundPlayer
             try
             {
                 await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
-                PlaySound(randomSound);
+                var retries = 3;
+                for (int i = 1; i <= retries; i++)
+                {
+                    try
+                    {
+                        PlaySound(randomSound);
+                        break;
+                    }
+                    catch (Exception)
+                    {
+                        if (i == retries)
+                            throw;
+                        Console.WriteLine("PlaySound failed! Retrying!");
+                        await Task.Delay(100);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("PlaySound failed! " + ex.ToString());
             }
             finally
             {
                 await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
             }
-
         }
 
         private static void PlaySound(string soundFile)
@@ -136,6 +154,10 @@ namespace HomeAssistantSoundPlayer
 
             process.Start();
             process.WaitForExit();
+            if (process.ExitCode != 0)
+            {
+                throw new Exception($"Error while playing sound! ExitCode {process.ExitCode}");
+            }
 
             Console.WriteLine("Done!");
         }
