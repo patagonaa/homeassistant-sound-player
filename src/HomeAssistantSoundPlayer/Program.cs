@@ -159,7 +159,7 @@ namespace HomeAssistantSoundPlayer
                 throw new Exception($"Error while playing sound! ExitCode {process.ExitCode}");
             }
 
-            Console.WriteLine("Done!");
+            Console.WriteLine($"Done! ExitCode {process.ExitCode}");
         }
     }
 }
