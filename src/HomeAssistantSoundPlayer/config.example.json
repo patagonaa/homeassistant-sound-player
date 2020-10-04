@@ -1,0 +1,15 @@
+﻿{
+    "DeviceIdentifier": "patagona-homeserver",
+    "Mqtt": {
+        "Host": "mqtt.example.com",
+        "Username": "example",
+        "Password": "secret"
+    },
+    "SoundPools": [
+        {
+            "Name": "Random",
+            "Identifier": "random",
+            "Directory": "/sounds/random"
+        }
+    ]
+}

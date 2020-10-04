@@ -1,0 +1,5 @@
+**/config*.json
+**/.vs/
+**/bin
+**/obj
+sounds/

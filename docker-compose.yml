@@ -1,0 +1,13 @@
+version: "3"
+
+services:
+  app:
+    restart: unless-stopped
+    image: homeassistant-sound-player
+    build: .
+    devices:
+        - "/dev/snd/:/dev/snd/"
+    volumes:
+      - "/etc/asound.conf:/etc/asound.conf:ro"
+      - "./src/HomeAssistantSoundPlayer/config.json:/app/config.json"
+      - "./sounds:/sounds"
