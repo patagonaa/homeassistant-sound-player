@@ -130,11 +130,11 @@ namespace HomeAssistantSoundPlayer
                 _soundProviders[soundPool.Identifier] = soundProvider = new SoundProvider(soundPool, _loggerFactory.CreateLogger<SoundProvider>());
             }
 
-            var nextSound = soundProvider.GetNextSound();
-
             try
             {
                 await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
+
+                var nextSound = soundProvider.GetNextSound();
                 var retries = 3;
                 for (int i = 1; i <= retries; i++)
                 {
@@ -158,7 +158,7 @@ namespace HomeAssistantSoundPlayer
             }
             catch (Exception ex)
             {
-                _logger.LogError("PlaySound failed! " + ex.ToString());
+                _logger.LogError(ex, "PlaySound failed! ");
             }
             finally
             {
