@@ -141,19 +141,23 @@ namespace HomeAssistantSoundPlayer
             }
         }
 
-        private Task PlaySound(string soundFile)
+        private async Task PlaySound(string soundFile)
         {
             Console.WriteLine($"Playing Sound {soundFile}");
 
             var tcs = new TaskCompletionSource<bool>();
 
-            var startInfo = new ProcessStartInfo("ffplay");
+            var startInfo = new ProcessStartInfo("ffplay")
+            {
+                UseShellExecute = false,
+                RedirectStandardError = true
+            };
             startInfo.ArgumentList.Add("-i");
             startInfo.ArgumentList.Add(soundFile);
             startInfo.ArgumentList.Add("-nodisp");
             startInfo.ArgumentList.Add("-autoexit");
 
-            var process = new Process
+            using var process = new Process
             {
                 StartInfo = startInfo,
                 EnableRaisingEvents = true
@@ -163,6 +167,9 @@ namespace HomeAssistantSoundPlayer
 
             process.ErrorDataReceived += (o, a) =>
             {
+                if (a.Data == null)
+                    return;
+
                 Console.WriteLine(a.Data);
                 if (a.Data.Contains("open failed") || a.Data.Contains("Failed to open file"))
                 {
@@ -176,7 +183,7 @@ namespace HomeAssistantSoundPlayer
                     tcs.SetException(new Exception($"Error while playing sound! ExitCode {process.ExitCode}"));
                     return;
                 }
-                if(errorInLog)
+                if (errorInLog)
                 {
                     tcs.SetException(new Exception("Error while playing sound! ffplay logged an error!"));
                     return;
@@ -184,10 +191,10 @@ namespace HomeAssistantSoundPlayer
                 Console.WriteLine($"Done!");
                 tcs.SetResult(true);
             };
-
             process.Start();
+            process.BeginErrorReadLine();
 
-            return tcs.Task;
+            await tcs.Task;
         }
     }
 }
