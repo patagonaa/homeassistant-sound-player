@@ -45,6 +45,11 @@ namespace HomeAssistantSoundPlayer
 
             await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "online", MqttQualityOfServiceLevel.ExactlyOnce, true);
 
+            await SetupHomeAssistantAutoDiscovery();
+        }
+
+        private async Task SetupHomeAssistantAutoDiscovery()
+        {
             foreach (var soundPool in _config.SoundPools)
             {
                 var switchConfig = new HomeAssistantDiscovery()
@@ -114,7 +119,7 @@ namespace HomeAssistantSoundPlayer
                 {
                     try
                     {
-                        PlaySound(randomSound);
+                        await PlaySound(randomSound);
                         break;
                     }
                     catch (Exception)
@@ -136,9 +141,11 @@ namespace HomeAssistantSoundPlayer
             }
         }
 
-        private void PlaySound(string soundFile)
+        private Task PlaySound(string soundFile)
         {
-            var process = new Process();
+            Console.WriteLine($"Playing Sound {soundFile}");
+
+            var tcs = new TaskCompletionSource<bool>();
 
             var startInfo = new ProcessStartInfo("ffplay");
             startInfo.ArgumentList.Add("-i");
@@ -146,20 +153,41 @@ namespace HomeAssistantSoundPlayer
             startInfo.ArgumentList.Add("-nodisp");
             startInfo.ArgumentList.Add("-autoexit");
 
-            process.StartInfo = startInfo;
+            var process = new Process
+            {
+                StartInfo = startInfo,
+                EnableRaisingEvents = true
+            };
 
-            process.ErrorDataReceived += (o, a) => Console.WriteLine(a.Data);
+            bool errorInLog = false;
 
-            Console.WriteLine($"Playing Sound {soundFile}");
+            process.ErrorDataReceived += (o, a) =>
+            {
+                Console.WriteLine(a.Data);
+                if (a.Data.Contains("open failed") || a.Data.Contains("Failed to open file"))
+                {
+                    errorInLog = true;
+                }
+            };
+            process.Exited += (o, a) =>
+            {
+                if (process.ExitCode != 0)
+                {
+                    tcs.SetException(new Exception($"Error while playing sound! ExitCode {process.ExitCode}"));
+                    return;
+                }
+                if(errorInLog)
+                {
+                    tcs.SetException(new Exception("Error while playing sound! ffplay logged an error!"));
+                    return;
+                }
+                Console.WriteLine($"Done!");
+                tcs.SetResult(true);
+            };
 
             process.Start();
-            process.WaitForExit();
-            if (process.ExitCode != 0)
-            {
-                throw new Exception($"Error while playing sound! ExitCode {process.ExitCode}");
-            }
 
-            Console.WriteLine($"Done! ExitCode {process.ExitCode}");
+            return tcs.Task;
         }
     }
 }
