@@ -25,7 +25,7 @@ namespace HomeAssistantSoundPlayer
             return Directory.GetFiles(_config.Directory, "*", SearchOption.AllDirectories);
         }
 
-        public Task<Stream> GetNextSound()
+        public string GetNextSound()
         {
             if(_remainingSounds.Count == 0)
             {
@@ -40,8 +40,12 @@ namespace HomeAssistantSoundPlayer
 
             var randomSound = _remainingSounds.Dequeue();
             _logger.LogInformation("Random sound is... {SoundName}", randomSound);
+            return randomSound;
+        }
 
-            return Task.FromResult<Stream>(File.OpenRead(randomSound));
+        public Task<Stream> GetSound(string path)
+        {
+            return Task.FromResult<Stream>(File.OpenRead(path));
         }
 
         public void Dispose()

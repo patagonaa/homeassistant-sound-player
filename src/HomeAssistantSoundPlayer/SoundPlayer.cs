@@ -130,6 +130,8 @@ namespace HomeAssistantSoundPlayer
                 _soundProviders[soundPool.Identifier] = soundProvider = new SoundProvider(soundPool, _loggerFactory.CreateLogger<SoundProvider>());
             }
 
+            var nextSound = soundProvider.GetNextSound();
+
             try
             {
                 await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
@@ -138,7 +140,7 @@ namespace HomeAssistantSoundPlayer
                 {
                     try
                     {
-                        using (var sound = await soundProvider.GetNextSound())
+                        using (var sound = await soundProvider.GetSound(nextSound))
                         {
                             await PlaySound(sound);
                         }
