@@ -9,5 +9,5 @@ services:
         - "/dev/snd/:/dev/snd/"
     volumes:
       - "/etc/asound.conf:/etc/asound.conf:ro"
-      - "./src/HomeAssistantSoundPlayer/config.json:/app/config.json"
+      - "./src/HomeAssistantSoundPlayer/configs/appSettings.json:/app/configs/appSettings.json"
       - "./sounds:/sounds"

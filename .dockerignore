@@ -1,4 +1,4 @@
-**/config*.json
+**/appSettings*.json
 **/.vs/
 **/bin
 **/obj

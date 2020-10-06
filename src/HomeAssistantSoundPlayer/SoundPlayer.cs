@@ -1,4 +1,7 @@
-﻿using MQTTnet;
+﻿using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using MQTTnet;
 using MQTTnet.Client.Options;
 using MQTTnet.Extensions.ManagedClient;
 using MQTTnet.Protocol;
@@ -9,23 +12,29 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace HomeAssistantSoundPlayer
 {
-    internal class SoundPlayer
+    internal class SoundPlayer : IHostedService
     {
         private readonly Configuration _config;
         private IManagedMqttClient _mqttClient;
-        private static readonly Random _random = new Random();
+        private readonly IDictionary<string, SoundProvider> _soundProviders = new Dictionary<string, SoundProvider>();
+        private readonly ILoggerFactory _loggerFactory;
+        private readonly ILogger<SoundPlayer> _logger;
 
-        public SoundPlayer(Configuration config)
+        public SoundPlayer(IOptions<Configuration> config, ILoggerFactory loggerFactory)
         {
-            _config = config;
+            _config = config.Value;
+            _loggerFactory = loggerFactory;
+            _logger = loggerFactory.CreateLogger<SoundPlayer>();
         }
 
-        public async Task Start()
+        public async Task StartAsync(CancellationToken token)
         {
+            _logger.LogInformation("Starting...");
             var mqttConfig = _config.Mqtt;
 
             var options = new ManagedMqttClientOptionsBuilder()
@@ -46,6 +55,19 @@ namespace HomeAssistantSoundPlayer
             await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "online", MqttQualityOfServiceLevel.ExactlyOnce, true);
 
             await SetupHomeAssistantAutoDiscovery();
+            _logger.LogInformation("Started!");
+        }
+
+        public async Task StopAsync(CancellationToken token)
+        {
+            _logger.LogInformation("Stopping...");
+            await _mqttClient?.StopAsync();
+            _mqttClient?.Dispose();
+            foreach (var provider in _soundProviders.Values)
+            {
+                provider.Dispose();
+            }
+            _logger.LogInformation("Stopped!");
         }
 
         private async Task SetupHomeAssistantAutoDiscovery()
@@ -79,12 +101,6 @@ namespace HomeAssistantSoundPlayer
             }
         }
 
-        public async Task Stop()
-        {
-            await _mqttClient?.StopAsync();
-            _mqttClient?.Dispose();
-        }
-
         private async Task MessageReceived(MqttApplicationMessageReceivedEventArgs messageEvent)
         {
             var message = messageEvent.ApplicationMessage;
@@ -92,7 +108,7 @@ namespace HomeAssistantSoundPlayer
             var payload = message.ConvertPayloadToString();
             var soundPoolId = splitTopic[3];
 
-            Console.WriteLine($"{message.Topic} {payload}");
+            _logger.LogDebug("{MessageTopic} {MessagePayload}", message.Topic, payload);
 
             var soundPool = _config.SoundPools.SingleOrDefault(x => x.Identifier == soundPoolId);
 
@@ -101,39 +117,48 @@ namespace HomeAssistantSoundPlayer
             if (!state)
                 return;
 
-            Console.WriteLine($"Starting sound {soundPool}");
+            _logger.LogInformation("Starting sound from pool {SoundPool}", soundPool.Name);
 
             await PlaySoundFromPool(soundPool);
         }
 
         private async Task PlaySoundFromPool(SoundPoolConfig soundPool)
         {
-            var files = Directory.GetFiles(soundPool.Directory, "*", SearchOption.AllDirectories);
-            var randomSound = files[_random.Next(files.Length)];
+            SoundProvider soundProvider;
+            if (!_soundProviders.TryGetValue(soundPool.Identifier, out soundProvider))
+            {
+                _soundProviders[soundPool.Identifier] = soundProvider = new SoundProvider(soundPool, _loggerFactory.CreateLogger<SoundProvider>());
+            }
 
             try
             {
                 await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
+
+                var nextSound = soundProvider.GetNextSound();
                 var retries = 3;
                 for (int i = 1; i <= retries; i++)
                 {
                     try
                     {
-                        await PlaySound(randomSound);
+                        using (var sound = await soundProvider.GetSound(nextSound))
+                        {
+                            await PlaySound(sound);
+                        }
+
                         break;
                     }
                     catch (Exception)
                     {
                         if (i == retries)
                             throw;
-                        Console.WriteLine("PlaySound failed! Retrying!");
+                        _logger.LogWarning("PlaySound failed! Retrying!");
                         await Task.Delay(100);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine("PlaySound failed! " + ex.ToString());
+                _logger.LogError(ex, "PlaySound failed! ");
             }
             finally
             {
@@ -141,28 +166,22 @@ namespace HomeAssistantSoundPlayer
             }
         }
 
-        private async Task PlaySound(string soundFile)
+        private async Task PlaySound(Stream soundFile)
         {
-            Console.WriteLine($"Playing Sound {soundFile}");
-
             var tcs = new TaskCompletionSource<bool>();
 
-            var startInfo = new ProcessStartInfo("ffplay")
+            var startInfo = new ProcessStartInfo("ffplay", "-i - -nodisp -autoexit")
             {
                 UseShellExecute = false,
+                RedirectStandardInput = true,
                 RedirectStandardError = true
             };
-            startInfo.ArgumentList.Add("-i");
-            startInfo.ArgumentList.Add(soundFile);
-            startInfo.ArgumentList.Add("-nodisp");
-            startInfo.ArgumentList.Add("-autoexit");
 
             using var process = new Process
             {
                 StartInfo = startInfo,
                 EnableRaisingEvents = true
             };
-
             bool errorInLog = false;
 
             process.ErrorDataReceived += (o, a) =>
@@ -170,7 +189,7 @@ namespace HomeAssistantSoundPlayer
                 if (a.Data == null)
                     return;
 
-                Console.WriteLine(a.Data);
+                _logger.LogInformation(a.Data);
                 if (a.Data.Contains("open failed") || a.Data.Contains("Failed to open file"))
                 {
                     errorInLog = true;
@@ -188,11 +207,16 @@ namespace HomeAssistantSoundPlayer
                     tcs.SetException(new Exception("Error while playing sound! ffplay logged an error!"));
                     return;
                 }
-                Console.WriteLine($"Done!");
+                _logger.LogInformation($"Done!");
                 tcs.SetResult(true);
             };
             process.Start();
             process.BeginErrorReadLine();
+
+            using (var stdin = process.StandardInput.BaseStream)
+            {
+                await soundFile.CopyToAsync(stdin);
+            }
 
             await tcs.Task;
         }

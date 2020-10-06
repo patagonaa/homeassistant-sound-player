@@ -1,4 +1,8 @@
 ﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Serilog;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -6,19 +10,40 @@ namespace HomeAssistantSoundPlayer
 {
     class Program
     {
-        static async Task Main(string[] args)
+        public static async Task Main(string[] args)
         {
-            var configRoot = new ConfigurationBuilder()
-                .AddJsonFile("config.json")
+            await Host.CreateDefaultBuilder(args)
+                .ConfigureAppConfiguration(ConfigureAppConfiguration)
+                .ConfigureServices(ConfigureServices)
+                .ConfigureLogging(ConfigureLogging)
+                .RunConsoleAsync();
+        }
+
+        private static void ConfigureLogging(HostBuilderContext ctx, ILoggingBuilder loggingBuilder)
+        {
+            loggingBuilder.ClearProviders();
+
+            Log.Logger = new LoggerConfiguration()
+                .Enrich.FromLogContext()
+                .WriteTo.Console()
+                .CreateLogger();
+            loggingBuilder.AddSerilog(Log.Logger);
+        }
+
+        private static void ConfigureServices(HostBuilderContext ctx, IServiceCollection services)
+        {
+            services.Configure<Configuration>(ctx.Configuration);
+
+            services.AddHostedService<SoundPlayer>();
+        }
+
+        private static void ConfigureAppConfiguration(HostBuilderContext ctx, IConfigurationBuilder configBuilder)
+        {
+            configBuilder.Sources.Clear();
+            configBuilder
+                .AddJsonFile("configs/appSettings.json", optional: true)
+                .AddEnvironmentVariables()
                 .Build();
-
-            var config = configRoot.Get<Configuration>();
-
-            var player = new SoundPlayer(config);
-
-            await player.Start();
-
-            await Task.Delay(Timeout.Infinite);
         }
     }
 }
