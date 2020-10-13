@@ -61,6 +61,7 @@ namespace HomeAssistantSoundPlayer
         public async Task StopAsync(CancellationToken token)
         {
             _logger.LogInformation("Stopping...");
+            await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "offline", MqttQualityOfServiceLevel.ExactlyOnce, true);
             await _mqttClient?.StopAsync();
             _mqttClient?.Dispose();
             foreach (var provider in _soundProviders.Values)
