@@ -10,6 +10,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -22,6 +23,7 @@ namespace HomeAssistantSoundPlayer
     {
         private readonly Configuration _config;
         private IManagedMqttClient _mqttClient;
+        private readonly IDictionary<string, SoundPoolState> _soundPoolStates = new Dictionary<string, SoundPoolState>();
         private readonly IDictionary<string, SoundProvider> _soundProviders = new Dictionary<string, SoundProvider>();
         private readonly ILoggerFactory _loggerFactory;
         private readonly ILogger<SoundPlayer> _logger;
@@ -52,7 +54,6 @@ namespace HomeAssistantSoundPlayer
             _mqttClient.UseApplicationMessageReceivedHandler(MessageReceived);
 
             await _mqttClient.StartAsync(options);
-
             await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "online", MqttQualityOfServiceLevel.ExactlyOnce, true);
 
             await SetupHomeAssistantAutoDiscovery();
@@ -76,13 +77,21 @@ namespace HomeAssistantSoundPlayer
         {
             foreach (var soundPool in _config.SoundPools)
             {
+                var topicBase = $"homeassistant/light/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}";
+
                 var switchConfig = new HomeAssistantDiscovery()
                 {
                     UniqueId = $"{_config.DeviceIdentifier}_soundpool_{soundPool.Identifier}",
                     Name = $"SoundPool {soundPool.Name}",
-                    TopicBase = $"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}",
-                    CommandTopic = "~/set",
-                    StateTopic = "~/state",
+                    TopicBase = topicBase,
+
+                    CommandTopic = "~/play",
+                    StateTopic = "~/play_state",
+
+                    BrightnessCommandTopic = "~/volume",
+                    BrightnessStateTopic = "~/volume_state",
+                    BrightnessScale = 100,
+
                     Device = new HomeAssistantDevice
                     {
                         Name = _config.DeviceIdentifier,
@@ -97,9 +106,18 @@ namespace HomeAssistantSoundPlayer
 
                 var configJson = JsonConvert.SerializeObject(switchConfig);
 
-                await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/config", configJson, MqttQualityOfServiceLevel.ExactlyOnce, true);
-                await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
-                await _mqttClient.SubscribeAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/set");
+                await _mqttClient.PublishAsync($"{topicBase}/config", configJson, MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient.PublishAsync($"{topicBase}/play_state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient.SubscribeAsync($"{topicBase}/play");
+                await _mqttClient.SubscribeAsync($"{topicBase}/volume");
+
+                _soundPoolStates[soundPool.Identifier] = new SoundPoolState
+                {
+                    TopicBase = topicBase,
+                    VolumePercent = 100,
+                    Config = soundPool,
+                    SoundProvider = new SoundProvider(soundPool, _loggerFactory.CreateLogger<SoundProvider>())
+                };
             }
         }
 
@@ -107,34 +125,44 @@ namespace HomeAssistantSoundPlayer
         {
             var message = messageEvent.ApplicationMessage;
             var splitTopic = message.Topic.Split('/');
-            var payload = message.ConvertPayloadToString();
+
             var soundPoolId = splitTopic[3];
+            var command = splitTopic[4];
+            var payload = message.ConvertPayloadToString();
 
             _logger.LogDebug("{MessageTopic} {MessagePayload}", message.Topic, payload);
 
-            var soundPool = _config.SoundPools.SingleOrDefault(x => x.Identifier == soundPoolId);
+            var soundPoolState = _soundPoolStates[soundPoolId];
 
-            var state = payload.Equals("ON", StringComparison.OrdinalIgnoreCase);
+            switch (command)
+            {
+                case "play":
+                    var play = payload.Equals("ON", StringComparison.OrdinalIgnoreCase);
 
-            if (!state)
-                return;
+                    if (!play)
+                        return;
 
-            _logger.LogInformation("Starting sound from pool {SoundPool}", soundPool.Name);
+                    _logger.LogInformation("Starting sound from pool {SoundPool}", soundPoolState.Config.Name);
 
-            await PlaySoundFromPool(soundPool);
+                    await PlaySoundFromPool(soundPoolState);
+                    break;
+                case "volume":
+                    var volume = int.Parse(payload, CultureInfo.InvariantCulture);
+                    soundPoolState.VolumePercent = volume;
+                    await _mqttClient.PublishAsync($"{soundPoolState.TopicBase}/volume_state", volume.ToString(CultureInfo.InvariantCulture), MqttQualityOfServiceLevel.ExactlyOnce, true);
+                    break;
+                default:
+                    break;
+            }
         }
 
-        private async Task PlaySoundFromPool(SoundPoolConfig soundPool)
+        private async Task PlaySoundFromPool(SoundPoolState soundPool)
         {
-            SoundProvider soundProvider;
-            if (!_soundProviders.TryGetValue(soundPool.Identifier, out soundProvider))
-            {
-                _soundProviders[soundPool.Identifier] = soundProvider = new SoundProvider(soundPool, _loggerFactory.CreateLogger<SoundProvider>());
-            }
+            SoundProvider soundProvider = soundPool.SoundProvider;
 
             try
             {
-                await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient.PublishAsync($"{soundPool.TopicBase}/play_state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
 
                 var nextSound = soundProvider.GetNextSound();
                 var retries = 3;
@@ -144,7 +172,7 @@ namespace HomeAssistantSoundPlayer
                     {
                         using (var sound = await soundProvider.GetSound(nextSound))
                         {
-                            await PlaySound(sound);
+                            await PlaySound(sound, soundPool.VolumePercent);
                         }
 
                         break;
@@ -164,15 +192,15 @@ namespace HomeAssistantSoundPlayer
             }
             finally
             {
-                await _mqttClient.PublishAsync($"homeassistant/switch/{_config.DeviceIdentifier}_sounds/{soundPool.Identifier}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient.PublishAsync($"{soundPool.TopicBase}/play_state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
             }
         }
 
-        private async Task PlaySound(Stream soundFile)
+        private async Task PlaySound(Stream soundFile, int volumePercent)
         {
             var tcs = new TaskCompletionSource<bool>();
 
-            var startInfo = new ProcessStartInfo("ffplay", "-i - -nodisp -autoexit")
+            var startInfo = new ProcessStartInfo("ffplay", $"-volume {volumePercent.ToString(CultureInfo.InvariantCulture)} -i - -nodisp -autoexit")
             {
                 UseShellExecute = false,
                 RedirectStandardInput = true,
