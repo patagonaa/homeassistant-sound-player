@@ -124,13 +124,14 @@ namespace HomeAssistantSoundPlayer
         private async Task MessageReceived(MqttApplicationMessageReceivedEventArgs messageEvent)
         {
             var message = messageEvent.ApplicationMessage;
+            var payload = message.ConvertPayloadToString();
+
+            _logger.LogInformation("{MessageTopic} {MessagePayload}", message.Topic, payload);
+
             var splitTopic = message.Topic.Split('/');
 
             var soundPoolId = splitTopic[3];
             var command = splitTopic[4];
-            var payload = message.ConvertPayloadToString();
-
-            _logger.LogDebug("{MessageTopic} {MessagePayload}", message.Topic, payload);
 
             var soundPoolState = _soundPoolStates[soundPoolId];
 
