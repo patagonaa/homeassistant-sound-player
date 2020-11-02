@@ -1,9 +1,9 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using HomeAssistantSoundPlayer.SoundProvider;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace HomeAssistantSoundPlayer
@@ -32,8 +32,8 @@ namespace HomeAssistantSoundPlayer
 
         private static void ConfigureServices(HostBuilderContext ctx, IServiceCollection services)
         {
+            services.AddTransient<SoundProviderFactory>();
             services.Configure<Configuration>(ctx.Configuration);
-
             services.AddHostedService<SoundPlayer>();
         }
 

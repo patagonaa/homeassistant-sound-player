@@ -4,6 +4,6 @@
     {
         public string Name { get; set; }
         public string Identifier { get; set; }
-        public string Directory { get; set; }
+        public string Uri { get; set; }
     }
 }
