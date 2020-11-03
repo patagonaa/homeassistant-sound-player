@@ -13,9 +13,14 @@ namespace HomeAssistantSoundPlayer.SoundProvider
             _path = path;
         }
 
-        public IList<string> GetSounds()
+        public Task<IList<string>> GetSounds()
         {
-            return Directory.GetFiles(_path, "*", SearchOption.AllDirectories);
+            return Task.FromResult<IList<string>>(Directory.GetFiles(_path, "*", SearchOption.AllDirectories));
+        }
+
+        public Task PopulateCache(IEnumerable<string> sounds)
+        {
+            return Task.CompletedTask;
         }
 
         public Task<Stream> GetSound(string path)

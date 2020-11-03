@@ -24,15 +24,15 @@ namespace HomeAssistantSoundPlayer
     {
         private readonly Configuration _config;
         private IManagedMqttClient _mqttClient;
+        private Task _checkNewSoundsTask;
         private readonly IDictionary<string, SoundPoolState> _soundPools = new Dictionary<string, SoundPoolState>();
-        private readonly ILoggerFactory _loggerFactory;
         private readonly SoundProviderFactory _soundProviderFactory;
         private readonly ILogger<SoundPlayer> _logger;
+        private readonly CancellationTokenSource _cts = new CancellationTokenSource();
 
         public SoundPlayer(IOptions<Configuration> config, ILoggerFactory loggerFactory, SoundProviderFactory soundProviderFactory)
         {
             _config = config.Value;
-            _loggerFactory = loggerFactory;
             _soundProviderFactory = soundProviderFactory;
             _logger = loggerFactory.CreateLogger<SoundPlayer>();
         }
@@ -59,15 +59,21 @@ namespace HomeAssistantSoundPlayer
             await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "online", MqttQualityOfServiceLevel.ExactlyOnce, true);
 
             await SetupHomeAssistantAutoDiscovery();
+            await SetupSoundPools();
+
+            _checkNewSoundsTask = Task.Run(() => CheckForNewSounds());
             _logger.LogInformation("Started!");
         }
 
         public async Task StopAsync(CancellationToken token)
         {
             _logger.LogInformation("Stopping...");
-            await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "offline", MqttQualityOfServiceLevel.ExactlyOnce, true);
+            _cts.Cancel();
+            await _mqttClient?.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "offline", MqttQualityOfServiceLevel.ExactlyOnce, true);
             await _mqttClient?.StopAsync();
             _mqttClient?.Dispose();
+            if (_checkNewSoundsTask != null)
+                await _checkNewSoundsTask;
             foreach (var provider in _soundPools.Values)
             {
                 provider.Dispose();
@@ -112,10 +118,20 @@ namespace HomeAssistantSoundPlayer
                 await _mqttClient.PublishAsync($"{topicBase}/play_state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
                 await _mqttClient.SubscribeAsync($"{topicBase}/play");
                 await _mqttClient.SubscribeAsync($"{topicBase}/volume");
+            }
+        }
+
+        private async Task SetupSoundPools()
+        {
+            foreach (var soundPoolConfig in _config.SoundPools)
+            {
+                var topicBase = $"homeassistant/light/{_config.DeviceIdentifier}_sounds/{soundPoolConfig.Identifier}";
 
                 var soundProvider = _soundProviderFactory.Get(soundPoolConfig.Uri);
                 var randomizer = new QueueSoundRandomizer();
-                randomizer.SetSounds(soundProvider.GetSounds());
+                var sounds = await soundProvider.GetSounds();
+                randomizer.SetSounds(sounds);
+                await soundProvider.PopulateCache(sounds);
 
                 _soundPools[soundPoolConfig.Identifier] = new SoundPoolState
                 {
@@ -259,6 +275,24 @@ namespace HomeAssistantSoundPlayer
             }
 
             await tcs.Task;
+        }
+
+        private async Task CheckForNewSounds()
+        {
+            while (!_cts.Token.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromMinutes(10), _cts.Token);
+
+                foreach (var soundPool in _soundPools.Values)
+                {
+                    if (soundPool.SoundProvider == null || soundPool.Randomizer == null || _cts.Token.IsCancellationRequested)
+                        continue;
+
+                    var sounds = await soundPool.SoundProvider.GetSounds();
+                    await soundPool.SoundProvider.PopulateCache(sounds);
+                    soundPool.Randomizer.SetSounds(sounds);
+                }
+            }
         }
     }
 }

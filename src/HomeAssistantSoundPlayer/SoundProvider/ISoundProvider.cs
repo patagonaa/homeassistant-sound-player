@@ -7,7 +7,8 @@ namespace HomeAssistantSoundPlayer.SoundProvider
 {
     internal interface ISoundProvider : IDisposable
     {
+        Task<IList<string>> GetSounds();
+        Task PopulateCache(IEnumerable<string> sounds);
         Task<Stream> GetSound(string path);
-        IList<string> GetSounds();
     }
 }
