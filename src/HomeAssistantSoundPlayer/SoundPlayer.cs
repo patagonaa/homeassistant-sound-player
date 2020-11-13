@@ -191,6 +191,8 @@ namespace HomeAssistantSoundPlayer
 
                 var nextSound = randomizer.GetNextSound();
 
+                _logger.LogInformation("Playing sound {SoundName}", nextSound);
+
                 var retries = 3;
                 for (int i = 1; i <= retries; i++)
                 {
@@ -226,10 +228,15 @@ namespace HomeAssistantSoundPlayer
         {
             var tcs = new TaskCompletionSource<bool>();
 
-            var startInfo = new ProcessStartInfo("ffplay", $"-volume {volumePercent.ToString(CultureInfo.InvariantCulture)} -i - -nodisp -autoexit")
+            var tmpFileName = Path.GetTempFileName();
+            using (var tmpFile = File.Open(tmpFileName, FileMode.OpenOrCreate, FileAccess.ReadWrite))
+            {
+                await soundFile.CopyToAsync(tmpFile);
+            }
+
+            var startInfo = new ProcessStartInfo("ffplay", $"-volume {volumePercent.ToString(CultureInfo.InvariantCulture)} -i \"{tmpFileName}\" -nodisp -autoexit")
             {
                 UseShellExecute = false,
-                RedirectStandardInput = true,
                 RedirectStandardError = true
             };
 
@@ -269,12 +276,16 @@ namespace HomeAssistantSoundPlayer
             process.Start();
             process.BeginErrorReadLine();
 
-            using (var stdin = process.StandardInput.BaseStream)
-            {
-                await soundFile.CopyToAsync(stdin);
-            }
-
             await tcs.Task;
+
+            try
+            {
+                File.Delete(tmpFileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error deleting Temp File {FileName}. Too bad!", tmpFileName);
+            }
         }
 
         private async Task CheckForNewSounds()
