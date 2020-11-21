@@ -1,4 +1,5 @@
 ﻿using HomeAssistantSoundPlayer.SoundProvider;
+using HomeAssistantSoundPlayer.SoundSequenceProvider;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -33,6 +34,7 @@ namespace HomeAssistantSoundPlayer
         private static void ConfigureServices(HostBuilderContext ctx, IServiceCollection services)
         {
             services.AddTransient<SoundProviderFactory>();
+            services.AddTransient<SoundSequenceProviderFactory>();
             services.Configure<Configuration>(ctx.Configuration);
             services.AddHostedService<SoundPlayer>();
         }

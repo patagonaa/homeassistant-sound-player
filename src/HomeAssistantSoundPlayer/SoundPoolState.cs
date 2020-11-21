@@ -1,5 +1,5 @@
 ﻿using HomeAssistantSoundPlayer.SoundProvider;
-using HomeAssistantSoundPlayer.SoundRandomizer;
+using HomeAssistantSoundPlayer.SoundSequenceProvider;
 using System;
 
 namespace HomeAssistantSoundPlayer
@@ -9,7 +9,7 @@ namespace HomeAssistantSoundPlayer
         public string TopicBase { get; set; }
         public int VolumePercent { get; set; }
         public ISoundProvider SoundProvider { get; set; }
-        public ISoundRandomizer Randomizer { get; set; }
+        public ISoundSequenceProvider SequenceProvider { get; set; }
         public SoundPoolConfig Config { get; set; }
 
         public void Dispose()

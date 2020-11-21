@@ -15,18 +15,21 @@ namespace HomeAssistantSoundPlayer.SoundProvider
 
         public ISoundProvider Get(string uriString)
         {
-            var uri = new Uri(uriString);
+            var splitUri = uriString.Split(':');
+            if (splitUri.Length < 2)
+                throw new ArgumentException("Uri must contain protocol");
 
-            switch (uri.Scheme)
+            switch (splitUri[0])
             {
                 case "file":
-                    return new FileSoundProvider(uri.AbsolutePath);
+                    return new FileSoundProvider(uriString.Replace("file://", ""));
                 case "http":
                 case "https":
+                    var uri = new Uri(uriString);
                     var creds = ParseUsernamePassword(uri.UserInfo);
                     return new WebDavSoundProvider(_loggerFactory.CreateLogger<WebDavSoundProvider>(), $"{uri.Scheme}://{uri.Authority}", uri.PathAndQuery, creds);
                 default:
-                    throw new ArgumentException($"Invalid URI Scheme: {uri.Scheme}");
+                    throw new ArgumentException($"Invalid URI Scheme: {splitUri[0]}");
             }
         }
 

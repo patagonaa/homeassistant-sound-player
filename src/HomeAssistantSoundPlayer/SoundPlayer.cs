@@ -1,6 +1,6 @@
 ﻿using HomeAssistantDiscoveryHelper;
 using HomeAssistantSoundPlayer.SoundProvider;
-using HomeAssistantSoundPlayer.SoundRandomizer;
+using HomeAssistantSoundPlayer.SoundSequenceProvider;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -14,6 +14,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,13 +28,15 @@ namespace HomeAssistantSoundPlayer
         private Task _checkNewSoundsTask;
         private readonly IDictionary<string, SoundPoolState> _soundPools = new Dictionary<string, SoundPoolState>();
         private readonly SoundProviderFactory _soundProviderFactory;
+        private readonly SoundSequenceProviderFactory _soundSequenceProviderFactory;
         private readonly ILogger<SoundPlayer> _logger;
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
 
-        public SoundPlayer(IOptions<Configuration> config, ILoggerFactory loggerFactory, SoundProviderFactory soundProviderFactory)
+        public SoundPlayer(IOptions<Configuration> config, ILoggerFactory loggerFactory, SoundProviderFactory soundProviderFactory, SoundSequenceProviderFactory soundSequenceProviderFactory)
         {
             _config = config.Value;
             _soundProviderFactory = soundProviderFactory;
+            _soundSequenceProviderFactory = soundSequenceProviderFactory;
             _logger = loggerFactory.CreateLogger<SoundPlayer>();
         }
 
@@ -128,9 +131,9 @@ namespace HomeAssistantSoundPlayer
                 var topicBase = $"homeassistant/light/{_config.DeviceIdentifier}_sounds/{soundPoolConfig.Identifier}";
 
                 var soundProvider = _soundProviderFactory.Get(soundPoolConfig.Uri);
-                var randomizer = new QueueSoundRandomizer();
+                var sequenceProvider = _soundSequenceProviderFactory.Get(soundPoolConfig.SequenceProvider);
                 var sounds = await soundProvider.GetSounds();
-                randomizer.SetSounds(sounds);
+                sequenceProvider.SetSounds(sounds);
                 await soundProvider.PopulateCache(sounds);
 
                 _soundPools[soundPoolConfig.Identifier] = new SoundPoolState
@@ -138,7 +141,7 @@ namespace HomeAssistantSoundPlayer
                     TopicBase = topicBase,
                     VolumePercent = 100,
                     Config = soundPoolConfig,
-                    Randomizer = randomizer,
+                    SequenceProvider = sequenceProvider,
                     SoundProvider = soundProvider
                 };
             }
@@ -183,24 +186,26 @@ namespace HomeAssistantSoundPlayer
         private async Task PlaySoundFromPool(SoundPoolState soundPool)
         {
             var soundProvider = soundPool.SoundProvider;
-            var randomizer = soundPool.Randomizer;
+            var randomizer = soundPool.SequenceProvider;
 
             try
             {
                 await _mqttClient.PublishAsync($"{soundPool.TopicBase}/play_state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
 
-                var nextSound = randomizer.GetNextSound();
-
-                _logger.LogInformation("Playing sound {SoundName}", nextSound);
+                var nextSounds = randomizer.GetNextSounds();
 
                 var retries = 3;
                 for (int i = 1; i <= retries; i++)
                 {
                     try
                     {
-                        using (var sound = await soundProvider.GetSound(nextSound))
+                        await foreach (var nextSound in nextSounds)
                         {
-                            await PlaySound(sound, soundPool.VolumePercent);
+                            _logger.LogInformation("Playing sounds {SoundName}", nextSound);
+                            using (var sound = await soundProvider.GetSound(nextSound))
+                            {
+                                await PlaySound(sound, soundPool.VolumePercent);
+                            }
                         }
 
                         break;
@@ -296,12 +301,12 @@ namespace HomeAssistantSoundPlayer
 
                 foreach (var soundPool in _soundPools.Values)
                 {
-                    if (soundPool.SoundProvider == null || soundPool.Randomizer == null || _cts.Token.IsCancellationRequested)
+                    if (soundPool.SoundProvider == null || soundPool.SequenceProvider == null || _cts.Token.IsCancellationRequested)
                         continue;
 
                     var sounds = await soundPool.SoundProvider.GetSounds();
                     await soundPool.SoundProvider.PopulateCache(sounds);
-                    soundPool.Randomizer.SetSounds(sounds);
+                    soundPool.SequenceProvider.SetSounds(sounds);
                 }
             }
         }

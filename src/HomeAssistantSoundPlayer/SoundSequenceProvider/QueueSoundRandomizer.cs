@@ -2,9 +2,9 @@
 using System.Collections.Generic;
 using System.Linq;
 
-namespace HomeAssistantSoundPlayer.SoundRandomizer
+namespace HomeAssistantSoundPlayer.SoundSequenceProvider
 {
-    internal class QueueSoundRandomizer : ISoundRandomizer
+    internal class QueueSoundRandomizer : ISoundSequenceProvider
     {
         private List<string> _allSounds;
         private Queue<string> _remainingSounds = new Queue<string>();
@@ -32,14 +32,16 @@ namespace HomeAssistantSoundPlayer.SoundRandomizer
             }
         }
 
-        public string GetNextSound()
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
+        public async IAsyncEnumerable<string> GetNextSounds()
+#pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
         {
             if (_remainingSounds.Count == 0)
             {
                 Randomize();
             }
 
-            return _remainingSounds.Dequeue();
+            yield return _remainingSounds.Dequeue();
         }
     }
 }
