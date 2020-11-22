@@ -41,7 +41,7 @@ namespace HomeAssistantSoundPlayer.SoundSequenceProvider
 
         public async IAsyncEnumerable<string> GetNextSounds()
         {
-            var speechBuffer = TimeSpan.FromSeconds(7); // estimated max length of speech before beep
+            var speechBuffer = TimeSpan.FromSeconds(6); // estimated max length of speech before beep
             var nowWithBuffer = DateTime.Now + speechBuffer;
             var nowAligned = nowWithBuffer.AddSeconds(10 - (nowWithBuffer.Second % 10));
 
