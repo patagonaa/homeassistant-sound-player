@@ -12,5 +12,12 @@ See `"src/HomeAssistantUnifiLed/configs/appSettings.example.json"` for a config 
 
 If you don't want to use this via Docker (or on Windows), make sure ffplay is available in `PATH`.
 
+## Configuration
+By default, the app looks for an `configs/appSettings.json` file or environment variables. An example config is provided in `src/HomeAssistantSoundPlayer/configs/appSettings.example.json`.
+
+## Build
+Make sure all submodules are checked out by either cloning this via `git clone --recurse-submodules` or running `git submodule update --init`.
+Afterwards, a simple `dotnet run --project src/HomeAssistantSoundPlayer/HomeAssistantSoundPlayer.csproj` or Visual Studio build should be enough to get it up and running.
+
 ## Installation
 Use the docker-compose file or use some other way to run `dotnet HomeAssistantSoundPlayer.dll` and keep it running.

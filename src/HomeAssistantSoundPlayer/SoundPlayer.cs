@@ -14,7 +14,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -303,16 +302,22 @@ namespace HomeAssistantSoundPlayer
         {
             while (!_cts.Token.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromMinutes(10), _cts.Token);
-                _logger.LogInformation("Checking for new sounds");
-                foreach (var soundPool in _soundPools.Values)
+                try
                 {
-                    if (soundPool.SoundProvider == null || soundPool.SequenceProvider == null || _cts.Token.IsCancellationRequested)
-                        continue;
+                    await Task.Delay(TimeSpan.FromMinutes(10), _cts.Token);
+                    _logger.LogInformation("Checking for new sounds");
+                    foreach (var soundPool in _soundPools.Values)
+                    {
+                        if (soundPool.SoundProvider == null || soundPool.SequenceProvider == null || _cts.Token.IsCancellationRequested)
+                            continue;
 
-                    var sounds = await soundPool.SoundProvider.GetSounds();
-                    await soundPool.SoundProvider.PopulateCache(sounds);
-                    soundPool.SequenceProvider.SetSounds(sounds);
+                        var sounds = await soundPool.SoundProvider.GetSounds();
+                        await soundPool.SoundProvider.PopulateCache(sounds);
+                        soundPool.SequenceProvider.SetSounds(sounds);
+                    }
+                }
+                catch (TaskCanceledException)
+                {
                 }
             }
         }
