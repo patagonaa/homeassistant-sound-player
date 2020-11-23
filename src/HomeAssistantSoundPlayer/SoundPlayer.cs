@@ -201,11 +201,14 @@ namespace HomeAssistantSoundPlayer
                     {
                         await foreach (var nextSound in nextSounds)
                         {
-                            _logger.LogInformation("Playing sounds {SoundName}", nextSound);
-                            using (var sound = await soundProvider.GetSound(nextSound))
-                            {
-                                await PlaySound(sound, soundPool.VolumePercent);
-                            }
+                            _logger.LogInformation("Playing sound {SoundName}", nextSound);
+
+                            var sw = Stopwatch.StartNew();
+                            using var sound = await soundProvider.GetSound(nextSound);
+                            sw.Stop();
+                            _logger.LogInformation("GetSound took {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
+
+                            await PlaySound(sound, soundPool.VolumePercent);
                         }
 
                         break;
@@ -233,11 +236,14 @@ namespace HomeAssistantSoundPlayer
         {
             var tcs = new TaskCompletionSource<bool>();
 
+            var sw = Stopwatch.StartNew();
             var tmpFileName = Path.GetTempFileName();
             using (var tmpFile = File.Open(tmpFileName, FileMode.OpenOrCreate, FileAccess.ReadWrite))
             {
                 await soundFile.CopyToAsync(tmpFile);
             }
+            sw.Stop();
+            _logger.LogInformation("Copy to tmp file took {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
 
             var startInfo = new ProcessStartInfo("ffplay", $"-volume {volumePercent.ToString(CultureInfo.InvariantCulture)} -i \"{tmpFileName}\" -nodisp -autoexit")
             {
@@ -298,7 +304,7 @@ namespace HomeAssistantSoundPlayer
             while (!_cts.Token.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromMinutes(10), _cts.Token);
-
+                _logger.LogInformation("Checking for new sounds");
                 foreach (var soundPool in _soundPools.Values)
                 {
                     if (soundPool.SoundProvider == null || soundPool.SequenceProvider == null || _cts.Token.IsCancellationRequested)
