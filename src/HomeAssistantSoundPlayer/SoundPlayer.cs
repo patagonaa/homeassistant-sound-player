@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
+using MQTTnet.Client.Connecting;
 using MQTTnet.Client.Options;
 using MQTTnet.Extensions.ManagedClient;
 using MQTTnet.Protocol;
@@ -57,10 +58,9 @@ namespace HomeAssistantSoundPlayer
 
             _mqttClient.UseApplicationMessageReceivedHandler(MessageReceived);
 
-            await _mqttClient.StartAsync(options);
-            await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "online", MqttQualityOfServiceLevel.ExactlyOnce, true);
+            _mqttClient.UseConnectedHandler(OnConnected);
 
-            await SetupHomeAssistantAutoDiscovery();
+            await _mqttClient.StartAsync(options);
             await SetupSoundPools();
 
             _checkNewSoundsTask = Task.Run(() => CheckForNewSounds());
@@ -71,7 +71,8 @@ namespace HomeAssistantSoundPlayer
         {
             _logger.LogInformation("Stopping...");
             _cts.Cancel();
-            await _mqttClient?.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "offline", MqttQualityOfServiceLevel.ExactlyOnce, true);
+            if (_mqttClient?.IsConnected ?? false)
+                await _mqttClient?.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "offline", MqttQualityOfServiceLevel.ExactlyOnce, true);
             await _mqttClient?.StopAsync();
             _mqttClient?.Dispose();
             if (_checkNewSoundsTask != null)
@@ -81,6 +82,12 @@ namespace HomeAssistantSoundPlayer
                 provider.Dispose();
             }
             _logger.LogInformation("Stopped!");
+        }
+
+        private async Task OnConnected(MqttClientConnectedEventArgs args)
+        {
+            await SetupHomeAssistantAutoDiscovery();
+            await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "online", MqttQualityOfServiceLevel.ExactlyOnce, true);
         }
 
         private async Task SetupHomeAssistantAutoDiscovery()
@@ -118,8 +125,6 @@ namespace HomeAssistantSoundPlayer
 
                 await _mqttClient.PublishAsync($"{topicBase}/config", configJson, MqttQualityOfServiceLevel.ExactlyOnce, true);
                 await _mqttClient.PublishAsync($"{topicBase}/play_state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
-                await _mqttClient.SubscribeAsync($"{topicBase}/play");
-                await _mqttClient.SubscribeAsync($"{topicBase}/volume");
             }
         }
 
@@ -143,6 +148,8 @@ namespace HomeAssistantSoundPlayer
                     SequenceProvider = sequenceProvider,
                     SoundProvider = soundProvider
                 };
+                await _mqttClient.SubscribeAsync($"{topicBase}/play");
+                await _mqttClient.SubscribeAsync($"{topicBase}/volume");
             }
         }
 
