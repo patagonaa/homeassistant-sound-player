@@ -22,13 +22,18 @@ namespace HomeAssistantSoundPlayer.SoundProvider
         public async Task<byte[]> GetSound(string path)
         {
             var sound = await _source.GetSound(path);
+            var sw = Stopwatch.StartNew();
             var raw = await GetRawFromSound(sound);
             var normalizedRaw = Normalize(raw, out var clipped);
             if (clipped)
             {
                 _logger.LogInformation("clipped {Path}!", path);
             }
-            return await GetSoundFromRaw(normalizedRaw);
+
+            byte[] normalizedSound = await GetSoundFromRaw(normalizedRaw);
+            sw.Stop();
+            _logger.LogInformation("Normalized sound {Path} in {Elapsed}ms", path, sw.ElapsedMilliseconds);
+            return normalizedSound;
         }
 
         private byte[] Normalize(byte[] raw, out bool clipped)
@@ -46,23 +51,26 @@ namespace HomeAssistantSoundPlayer.SoundProvider
             const double takePercentile = 0.995; // take the sample which is the x% loudest as a reference (0.99 with 1000 samples means "take the 10th loudest sample")
             const double targetGain = 0.5; // adjust amplitude (of the reference sample) to this level (0.5 = -6dB)
 
-            var referenceAmplitude = samples
-                .Select(x => x == short.MinValue ? short.MaxValue : Math.Abs(x)) // Abs(-32768) -> Exception
-                .OrderBy(x => x) // sort by amplitude
-                .Skip((int)(samples.Length * takePercentile)) // take the n%th sample
-                .Select(x => (short?)x) // make nullable
-                .FirstOrDefault();
+            var sortedSamples = (short[])samples.Clone();
+            Array.Sort(sortedSamples);
 
-            var factor = (short.MaxValue / (referenceAmplitude ?? short.MaxValue)) * targetGain;
+            var percentileIndex = (int)(samples.Length * takePercentile);
+            var referenceAmplitude = percentileIndex >= samples.Length ? short.MaxValue : sortedSamples[percentileIndex];
+
+            //var referenceAmplitude = samples
+            //    .Select(x => x == short.MinValue ? short.MaxValue : Math.Abs(x)) // Abs(-32768) -> Exception
+            //    .OrderBy(x => x) // sort by amplitude
+            //    .Skip((int)(samples.Length * takePercentile)) // take the n%th sample
+            //    .Select(x => (short?)x) // make nullable
+            //    .FirstOrDefault() ?? short.MaxValue;
+
+            var factor = (short.MaxValue / (double)referenceAmplitude) * targetGain;
 
             clipped = false;
-            if (referenceAmplitude.HasValue)
+            for (int i = 0; i < samples.Length; i++)
             {
-                for (int i = 0; i < samples.Length; i++)
-                {
-                    samples[i] = Clip(samples[i] * factor, out var sampleClipped);
-                    clipped |= sampleClipped;
-                }
+                samples[i] = Clip(samples[i] * factor, out var sampleClipped);
+                clipped |= sampleClipped;
             }
 
             var toReturn = new byte[raw.Length];
