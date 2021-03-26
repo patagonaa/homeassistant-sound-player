@@ -18,14 +18,14 @@ namespace HomeAssistantSoundPlayer.SoundProvider
             return Task.FromResult<IList<string>>(Directory.GetFiles(_path, "*", SearchOption.AllDirectories));
         }
 
-        public Task PopulateCache(IEnumerable<string> sounds)
+        public Task Init(IList<string> sounds)
         {
             return Task.CompletedTask;
         }
 
-        public Task<Stream> GetSound(string path)
+        public Task<byte[]> GetSound(string path)
         {
-            return Task.FromResult<Stream>(File.OpenRead(path));
+            return Task.FromResult<byte[]>(File.ReadAllBytes(path));
         }
 
         public void Dispose()

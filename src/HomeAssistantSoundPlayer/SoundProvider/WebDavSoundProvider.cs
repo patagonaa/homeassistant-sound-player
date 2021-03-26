@@ -16,7 +16,6 @@ namespace HomeAssistantSoundPlayer.SoundProvider
         private readonly WebDavClient _client;
         private readonly ILogger<WebDavSoundProvider> _logger;
         private readonly string _path;
-        private readonly ConcurrentDictionary<string, byte[]> _cache = new ConcurrentDictionary<string, byte[]>();
 
         public WebDavSoundProvider(ILogger<WebDavSoundProvider> logger, string host, string path, NetworkCredential credential)
         {
@@ -52,17 +51,9 @@ namespace HomeAssistantSoundPlayer.SoundProvider
             return sounds;
         }
 
-        public async Task PopulateCache(IEnumerable<string> sounds)
+        public async Task<byte[]> GetSound(string path)
         {
-            foreach (var sound in sounds)
-            {
-                if (!_cache.ContainsKey(sound))
-                    _cache[sound] = await GetSoundInternal(sound);
-            }
-        }
-
-        private async Task<byte[]> GetSoundInternal(string path)
-        {
+            var sw = Stopwatch.StartNew();
             var result = await _client.GetProcessedFile(path);
             if (!result.IsSuccessful)
             {
@@ -72,7 +63,6 @@ namespace HomeAssistantSoundPlayer.SoundProvider
             var ms = new MemoryStream();
             using (var webDavStream = result.Stream)
             {
-                var sw = Stopwatch.StartNew();
                 await webDavStream.CopyToAsync(ms);
                 sw.Stop();
                 _logger.LogInformation("Got sound {FilePath} in {ElapsedMilliseconds}ms", path, sw.ElapsedMilliseconds);
@@ -80,14 +70,9 @@ namespace HomeAssistantSoundPlayer.SoundProvider
             return ms.ToArray();
         }
 
-        public async Task<Stream> GetSound(string path)
+        public Task Init(IList<string> sounds)
         {
-            if(!_cache.TryGetValue(path, out var bytes))
-            {
-                _cache[path] = bytes = await GetSoundInternal(path);
-            }
-
-            return new MemoryStream(bytes, false);
+            return Task.CompletedTask;
         }
 
         public void Dispose()

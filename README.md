@@ -8,7 +8,7 @@ An example SoundSequenceProvider to tell the current time including the required
 See `"src/HomeAssistantUnifiLed/configs/appSettings.example.json"` for a config example.
 
 ## Dependencies
-`ffplay` has to be installed for audio playback. In the Dockerfile, this will be installed at build time automatically.
+`ffmpeg` and `ffplay` has to be installed for audio playback. In the Dockerfile, this will be installed at build time automatically.
 
 If you don't want to use this via Docker (or on Windows), make sure ffplay is available in `PATH`.
 

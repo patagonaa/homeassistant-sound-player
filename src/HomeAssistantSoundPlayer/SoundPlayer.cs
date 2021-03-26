@@ -158,7 +158,7 @@ namespace HomeAssistantSoundPlayer
                 var sequenceProvider = _soundSequenceProviderFactory.Get(soundPoolConfig.SequenceProvider);
                 var sounds = await soundProvider.GetSounds();
                 sequenceProvider.SetSounds(sounds);
-                await soundProvider.PopulateCache(sounds);
+                await soundProvider.Init(sounds);
 
                 _soundPools[soundPoolConfig.Identifier] = new SoundPoolState
                 {
@@ -255,7 +255,7 @@ namespace HomeAssistantSoundPlayer
                             _logger.LogInformation("Playing sound {SoundName}", nextSound);
 
                             var sw = Stopwatch.StartNew();
-                            using var sound = await soundProvider.GetSound(nextSound);
+                            var sound = await soundProvider.GetSound(nextSound);
                             sw.Stop();
                             _logger.LogInformation("GetSound took {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
 
@@ -283,16 +283,13 @@ namespace HomeAssistantSoundPlayer
             }
         }
 
-        private async Task PlaySound(Stream soundFile, int volumePercent)
+        private async Task PlaySound(byte[] soundFile, int volumePercent)
         {
             var tcs = new TaskCompletionSource<bool>();
 
             var sw = Stopwatch.StartNew();
             var tmpFileName = Path.GetTempFileName();
-            using (var tmpFile = File.Open(tmpFileName, FileMode.OpenOrCreate, FileAccess.ReadWrite))
-            {
-                await soundFile.CopyToAsync(tmpFile);
-            }
+            await File.WriteAllBytesAsync(tmpFileName, soundFile);
             sw.Stop();
             _logger.LogInformation("Copy to tmp file took {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
 
@@ -364,7 +361,7 @@ namespace HomeAssistantSoundPlayer
                             continue;
 
                         var sounds = await soundPool.SoundProvider.GetSounds();
-                        await soundPool.SoundProvider.PopulateCache(sounds);
+                        await soundPool.SoundProvider.Init(sounds);
                         soundPool.SequenceProvider.SetSounds(sounds);
                     }
                 }

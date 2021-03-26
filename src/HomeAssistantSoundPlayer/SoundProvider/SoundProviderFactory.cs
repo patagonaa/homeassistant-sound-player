@@ -22,12 +22,20 @@ namespace HomeAssistantSoundPlayer.SoundProvider
             switch (splitUri[0])
             {
                 case "file":
-                    return new FileSoundProvider(uriString.Replace("file://", ""));
+                    {
+                        var provider1 = new FileSoundProvider(uriString.Replace("file://", ""));
+                        var provider2 = new NormalizeSoundFilter(_loggerFactory.CreateLogger<NormalizeSoundFilter>(), provider1);
+                        return new CacheSoundFilter(_loggerFactory.CreateLogger<CacheSoundFilter>(), provider2);
+                    }
                 case "http":
                 case "https":
-                    var uri = new Uri(uriString);
-                    var creds = ParseUsernamePassword(uri.UserInfo);
-                    return new WebDavSoundProvider(_loggerFactory.CreateLogger<WebDavSoundProvider>(), $"{uri.Scheme}://{uri.Authority}", uri.PathAndQuery, creds);
+                    {
+                        var uri = new Uri(uriString);
+                        var creds = ParseUsernamePassword(uri.UserInfo);
+                        var provider1 = new WebDavSoundProvider(_loggerFactory.CreateLogger<WebDavSoundProvider>(), $"{uri.Scheme}://{uri.Authority}", uri.PathAndQuery, creds);
+                        var provider2 = new NormalizeSoundFilter(_loggerFactory.CreateLogger<NormalizeSoundFilter>(), provider1);
+                        return new CacheSoundFilter(_loggerFactory.CreateLogger<CacheSoundFilter>(), provider2);
+                    }
                 default:
                     throw new ArgumentException($"Invalid URI Scheme: {splitUri[0]}");
             }
