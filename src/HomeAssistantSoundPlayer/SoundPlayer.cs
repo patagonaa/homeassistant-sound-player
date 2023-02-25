@@ -5,8 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MQTTnet;
-using MQTTnet.Client.Connecting;
-using MQTTnet.Client.Options;
+using MQTTnet.Client;
 using MQTTnet.Extensions.ManagedClient;
 using MQTTnet.Protocol;
 using Newtonsoft.Json;
@@ -51,15 +50,16 @@ namespace HomeAssistantSoundPlayer
                 .WithClientOptions(new MqttClientOptionsBuilder()
                     .WithTcpServer(mqttConfig.Host)
                     .WithCredentials(mqttConfig.Username, mqttConfig.Password)
-                    .WithWillMessage(new MqttApplicationMessage { Topic = $"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", Payload = Encoding.UTF8.GetBytes("offline") })
+                    .WithWillTopic($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state")
+                    .WithWillPayload(Encoding.UTF8.GetBytes("offline"))
                     .Build())
                 .Build();
 
             _mqttClient = new MqttFactory().CreateManagedMqttClient();
 
-            _mqttClient.UseApplicationMessageReceivedHandler(MessageReceived);
+            _mqttClient.ApplicationMessageReceivedAsync += MessageReceived;
 
-            _mqttClient.UseConnectedHandler(OnConnected);
+            _mqttClient.ConnectedAsync += OnConnected;
 
             await _mqttClient.StartAsync(options);
             await SetupSoundPools();
@@ -73,7 +73,7 @@ namespace HomeAssistantSoundPlayer
             _logger.LogInformation("Stopping...");
             _cts.Cancel();
             if (_mqttClient?.IsConnected ?? false)
-                await _mqttClient?.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "offline", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient?.EnqueueAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "offline", MqttQualityOfServiceLevel.ExactlyOnce, true);
             await _mqttClient?.StopAsync();
             _mqttClient?.Dispose();
             if (_checkNewSoundsTask != null)
@@ -88,7 +88,7 @@ namespace HomeAssistantSoundPlayer
         private async Task OnConnected(MqttClientConnectedEventArgs args)
         {
             await SetupHomeAssistantAutoDiscovery();
-            await _mqttClient.PublishAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "online", MqttQualityOfServiceLevel.ExactlyOnce, true);
+            await _mqttClient.EnqueueAsync($"HomeAssistantSoundPlayer/{_config.DeviceIdentifier}/state", "online", MqttQualityOfServiceLevel.ExactlyOnce, true);
         }
 
         private async Task SetupHomeAssistantAutoDiscovery()
@@ -120,8 +120,8 @@ namespace HomeAssistantSoundPlayer
 
                 var configJson = JsonConvert.SerializeObject(switchConfig);
 
-                await _mqttClient.PublishAsync($"{switchTopicBase}/config", configJson, MqttQualityOfServiceLevel.ExactlyOnce, true);
-                await _mqttClient.PublishAsync($"{switchTopicBase}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient.EnqueueAsync($"{switchTopicBase}/config", configJson, MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient.EnqueueAsync($"{switchTopicBase}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
             }
 
             var lightTopicBase = $"homeassistant/light/{_config.DeviceIdentifier}_sounds/volume";
@@ -145,7 +145,7 @@ namespace HomeAssistantSoundPlayer
 
             var volumeConfigJson = JsonConvert.SerializeObject(volumeLightConfig);
 
-            await _mqttClient.PublishAsync($"{lightTopicBase}/config", volumeConfigJson, MqttQualityOfServiceLevel.ExactlyOnce, true);
+            await _mqttClient.EnqueueAsync($"{lightTopicBase}/config", volumeConfigJson, MqttQualityOfServiceLevel.ExactlyOnce, true);
         }
 
         private async Task SetupSoundPools()
@@ -199,13 +199,13 @@ namespace HomeAssistantSoundPlayer
                     case "set":
                         var isOn = payload.Equals("ON", StringComparison.OrdinalIgnoreCase);
                         _volumeMuted = !isOn;
-                        await _mqttClient.PublishAsync($"{lightTopicBase}/state", isOn ? "ON" : "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                        await _mqttClient.EnqueueAsync($"{lightTopicBase}/state", isOn ? "ON" : "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
                         _logger.LogInformation("Mute state set to {MuteState}", _volumeMuted);
                         break;
                     case "volume_set":
                         var volume = int.Parse(payload, CultureInfo.InvariantCulture);
                         _volumePercent = volume;
-                        await _mqttClient.PublishAsync($"{lightTopicBase}/volume_state", volume.ToString(CultureInfo.InvariantCulture), MqttQualityOfServiceLevel.ExactlyOnce, true);
+                        await _mqttClient.EnqueueAsync($"{lightTopicBase}/volume_state", volume.ToString(CultureInfo.InvariantCulture), MqttQualityOfServiceLevel.ExactlyOnce, true);
                         _logger.LogInformation("Volume set to {VolumeState}", _volumePercent);
                         break;
                     default:
@@ -241,7 +241,7 @@ namespace HomeAssistantSoundPlayer
 
             try
             {
-                await _mqttClient.PublishAsync($"{soundPool.TopicBase}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient.EnqueueAsync($"{soundPool.TopicBase}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
 
                 var nextSounds = randomizer.GetNextSounds();
 
@@ -279,7 +279,7 @@ namespace HomeAssistantSoundPlayer
             }
             finally
             {
-                await _mqttClient.PublishAsync($"{soundPool.TopicBase}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                await _mqttClient.EnqueueAsync($"{soundPool.TopicBase}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
             }
         }
 
