@@ -32,6 +32,7 @@ namespace HomeAssistantSoundPlayer
         private readonly CancellationTokenSource _cts = new CancellationTokenSource();
         private IManagedMqttClient _mqttClient;
         private Task _checkNewSoundsTask;
+        private Task _playTask;
         private bool _volumeMuted;
         private int _volumePercent = 100;
         public SoundPlayer(IOptions<Configuration> config, ILoggerFactory loggerFactory, SoundProviderFactory soundProviderFactory, SoundSequenceProviderFactory soundSequenceProviderFactory)
@@ -238,7 +239,7 @@ namespace HomeAssistantSoundPlayer
 
                             _logger.LogInformation("Starting sound from pool {SoundPool}", soundPoolState.Config.Name);
 
-                            await PlaySoundFromPool(soundPoolState);
+                            PlaySoundFromPool(soundPoolState);
                             break;
                         default:
                             break;
@@ -248,57 +249,63 @@ namespace HomeAssistantSoundPlayer
             else if (_soundPoolsByAdditionalTopic.TryGetValue(message.Topic, out var soundPoolState))
             {
                 _logger.LogInformation("Starting sound from pool {SoundPool}", soundPoolState.Config.Name);
-                await PlaySoundFromPool(soundPoolState);
+                PlaySoundFromPool(soundPoolState);
             }
         }
 
-        private async Task PlaySoundFromPool(SoundPoolState soundPool)
+        private void PlaySoundFromPool(SoundPoolState soundPool)
         {
             var soundProvider = soundPool.SoundProvider;
             var randomizer = soundPool.SequenceProvider;
 
-            try
-            {
-                await _mqttClient.EnqueueAsync($"{soundPool.TopicBase}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
+            if(_playTask != null && !_playTask.IsCompleted)
+                return;
 
-                var nextSounds = randomizer.GetNextSounds();
-
-                var retries = 3;
-                for (int i = 1; i <= retries; i++)
+            _playTask = Task.Run(async () =>
                 {
                     try
                     {
-                        await foreach (var nextSound in nextSounds)
+                        await _mqttClient.EnqueueAsync($"{soundPool.TopicBase}/state", "ON", MqttQualityOfServiceLevel.ExactlyOnce, true);
+
+                        var nextSounds = randomizer.GetNextSounds();
+
+                        var retries = 3;
+                        for (int i = 1; i <= retries; i++)
                         {
-                            _logger.LogInformation("Playing sound {SoundName}", nextSound);
+                            try
+                            {
+                                await foreach (var nextSound in nextSounds)
+                                {
+                                    _logger.LogInformation("Playing sound {SoundName}", nextSound);
 
-                            var sw = Stopwatch.StartNew();
-                            var sound = await soundProvider.GetSound(nextSound);
-                            sw.Stop();
-                            _logger.LogInformation("GetSound took {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
+                                    var sw = Stopwatch.StartNew();
+                                    var sound = await soundProvider.GetSound(nextSound);
+                                    sw.Stop();
+                                    _logger.LogInformation("GetSound took {ElapsedMilliseconds}ms", sw.ElapsedMilliseconds);
 
-                            await PlaySound(sound, _volumeMuted ? 0 : _volumePercent);
+                                    await PlaySound(sound, _volumeMuted ? 0 : _volumePercent);
+                                }
+
+                                break;
+                            }
+                            catch (Exception)
+                            {
+                                if (i == retries)
+                                    throw;
+                                _logger.LogWarning("PlaySound failed! Retrying!");
+                                await Task.Delay(100);
+                            }
                         }
-
-                        break;
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
-                        if (i == retries)
-                            throw;
-                        _logger.LogWarning("PlaySound failed! Retrying!");
-                        await Task.Delay(100);
+                        _logger.LogError(ex, "PlaySound failed! ");
                     }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "PlaySound failed! ");
-            }
-            finally
-            {
-                await _mqttClient.EnqueueAsync($"{soundPool.TopicBase}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
-            }
+                    finally
+                    {
+                        await _mqttClient.EnqueueAsync($"{soundPool.TopicBase}/state", "OFF", MqttQualityOfServiceLevel.ExactlyOnce, true);
+                    }
+                });
         }
 
         private async Task PlaySound(byte[] soundFile, int volumePercent)
