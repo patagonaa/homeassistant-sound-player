@@ -3,7 +3,7 @@ Play sounds via MQTT (with Home Assistant autodiscovery).
 Multiple sound pools can be configured, each one will add a new switch to Home Assistant.
 
 Sounds can either be played randomly (default) or with a custom `ISoundSequenceProvider`.
-An example SoundSequenceProvider to tell the current time including the required sounds in german by Zabex (see his microcontroller project to tell the time at <http://www.zabex.de/site/169zeitansage.html>) is provided.
+An example SoundSequenceProvider to tell the current time including the required sounds in german by Zabex is provided (see his microcontroller project to tell the time at https://www.zabex.de/frames/169zeitansage.html).
 
 See `"src/HomeAssistantUnifiLed/configs/appSettings.example.json"` for a config example.
 
